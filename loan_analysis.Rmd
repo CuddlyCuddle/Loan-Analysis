@@ -77,8 +77,8 @@ data %>%
 data %>%
   ggplot(aes(x = log.annual.inc, y = days.with.cr.line, color = dti)) +
   geom_point() +
-  geom_smooth(method = "loess")
-
+  geom_smooth(method = "loess") +
+  geom_smooth(method = "lm")
 
 data %>%
   ggplot(aes(x = revol.util, y = log.annual.inc)) +
@@ -132,7 +132,7 @@ data %>%
 
 summary(fico_int_model <- glm(formula = not.fully.paid ~ fico*int.rate, data = data, family = "binomial"))
 
-data %>%
+sample <- data %>% 
   
 ```
 
