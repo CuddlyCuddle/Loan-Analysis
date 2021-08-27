@@ -1,0 +1,113 @@
+---
+title: "Loan Repayment and borrower analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r, include = FALSE}
+libs <- c("dplyr", "tidyr", "data.table", "ggplot2")
+lapply(libs, require, character.only = T)
+```
+# Loading Data
+```{r cars}
+data <- fread("data/loan_data.csv") 
+```
+
+| Variable  | class     | description                    |
+|:----------|:----------|:-------------------------------|
+| credit_policy   | numeric | 1 if the customer meets the credit underwriting criteria; 0 otherwise. |
+| purpose      | character | The purpose of the loan. |
+| int_rate      | numeric   | The interest rate of the loan (more risky borrowers are assigned higher interest rates).  |
+| installment  | numeric   | The monthly installments owed by the borrower if the loan is funded. |
+| log_annual_inc | numeric   | The natural log of the self-reported annual income of the borrower. |
+| dti | numeric   | The debt-to-income ratio of the borrower (amount of debt divided by annual income). |
+| fico | numeric   | The FICO credit score of the borrower. |
+| days_with_cr_line | numeric   | The number of days the borrower has had a credit line. |
+| revol_bal | numeric   | The borrower's revolving balance (amount unpaid at the end of the credit card billing cycle). |
+| revol_util | numeric   | The borrower's revolving line utilization rate (the amount of the credit line used relative to total credit available). |
+| inq_last_6mths | numeric   | The borrower's number of inquiries by creditors in the last 6 months. |
+| delinq_2yrs | numeric   | The number of times the borrower had been 30+ days past due on a payment in the past 2 years. |
+| pub_rec | numeric   | The borrower's number of derogatory public records.
+| not_fully_paid | numeric   | 1 if the loan is not fully paid; 0 otherwise.
+
+# Exploratory Data Analysis
+```{r}
+data %>%
+ggplot(aes(x = factor(not.fully.paid), fill = factor(not.fully.paid))) +
+  geom_bar()
+
+fully_paid_prop <- data %>%
+  summarize(prop = mean(not.fully.paid == 0))
+```
+
+
+- Extract useful insights and visualize them in the most interesting way possible.
+- Find out how long it takes for users to pay back their loan.
+- Build a model that can predict the probability a user will be able to pay back their loan within a certain period.
+- Find out what kind of people take a loan for what purposes.
+
+```{r}
+data <- data %>%
+  mutate(annual_income = exp(log.annual.inc))
+```
+
+
+```{r}
+data %>% 
+  ggplot(aes(x = days.with.cr.line, color = factor(not.fully.paid))) +
+  geom_histogram()
+
+data %>% 
+  ggplot(aes(x = days.with.cr.line, color = factor(purpose))) +
+  geom_histogram()
+
+data %>% 
+  ggplot(aes(x = fico, y = days.with.cr.line, color = log.annual.inc)) +
+  geom_point() +
+  geom_smooth(method = "loess")
+
+data %>%
+  ggplot(aes(x = log.annual.inc, y = days.with.cr.line, color = dti)) +
+  geom_point() +
+  geom_smooth(method = "loess")
+
+data %>%
+  ggplot(aes(x = revol.util, y = log.annual.inc)) +
+  geom_point()
+```
+
+```{r}
+
+```
+
+```{r}
+(pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
+summary(pr)
+biplot(pr)
+plot(pr$x[,c(1,2)], col = as.factor(data$not.fully.paid))
+plot(pr$x[,c(1,3)], col = as.factor(data$not.fully.paid))
+plot(pr$x[,c(2,3)], col = as.factor(data$not.fully.paid))
+
+km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
+plot(pr$x[,1:2], col = km1$cluster)
+table(km1$cluster, data$not.fully.paid)
+```
+
+```{r}
+data %>%
+  group_by(not.fully.paid) %>%
+  mutate(m_fico = mean(fico),
+         m_int.rate = mean(int.rate)) %>%
+  ggplot(aes(x = m_fico, y = m_int.rate, color = factor(not.fully.paid))) +
+  geom_line()
+
+glm()
+```
