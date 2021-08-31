@@ -13,12 +13,15 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 ```{r, include = FALSE}
-libs <- c("dplyr", "tidyr", "data.table", "ggplot2")
+libs <- c("dplyr", "tidyr", "data.table", "ggplot2", "caret", "caTools")
 lapply(libs, require, character.only = T)
 ```
 # Loading Data
 ```{r cars}
-data <- fread("data/loan_data.csv") 
+data <- fread("data/loan_data.csv") %>% 
+        mutate(not.fully.paid = factor(ifelse(not.fully.paid == 1, "No", "Yes")),
+               credit.policy = factor(ifelse(credit.policy == 1, "No", "Yes")))
+
 ```
 
 | Variable  | class     | description                    |
@@ -47,52 +50,94 @@ ggplot(aes(x = factor(not.fully.paid), fill = factor(not.fully.paid))) +
 fully_paid_prop <- data %>%
   summarize(prop = mean(not.fully.paid == 0))
 ```
-
-
-- Extract useful insights and visualize them in the most interesting way possible.
-- Find out how long it takes for users to pay back their loan.
-- Build a model that can predict the probability a user will be able to pay back their loan within a certain period.
-- Find out what kind of people take a loan for what purposes.
-
-
+##
 ```{r}
 data %>% 
   ggplot(aes(x = days.with.cr.line, color = factor(not.fully.paid))) +
   geom_histogram()
+```
 
+##
+```{r}
 data %>% 
   ggplot(aes(x = days.with.cr.line, color = factor(purpose))) +
   geom_histogram()
+```
 
+##
+```{r}
 data %>% 
-  ggplot(aes(x = fico, y = days.with.cr.line, color = dti)) +
+  ggplot(aes(x = fico, y = days.with.cr.line, color = factor(not.fully.paid))) +
   geom_point() +
   geom_smooth(method = "loess")
+```
 
+##
+```{r}
 data %>% 
-  ggplot(aes(x = dti, y = fico, color = log.annual.inc)) +
+  ggplot(aes(x = revol.util, y = fico, color = not.fully.paid)) +
   geom_point() +
   geom_smooth(method = "lm")
+```
 
+
+```{r}
+data %>% 
+  ggplot(aes(x = dti, y = days.with.cr.line, color = factor(not.fully.paid))) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+
+##
+```{r}
 data %>%
   ggplot(aes(x = log.annual.inc, y = days.with.cr.line, color = dti)) +
   geom_point() +
   geom_smooth(method = "loess") +
   geom_smooth(method = "lm")
+```
 
+##
+```{r}
 data %>%
   ggplot(aes(x = revol.util, y = log.annual.inc)) +
   geom_point()
 ```
 
 
+# Cluster Analysis and Dimensionality reduction
+```{r}
+summary(pr <- prcomp(data[,c("fico", "revol.util", "days.with.cr.line", "dti")], scale = T))
+biplot(pr)
+km1 <- kmeans(scaled, centers = 3, nstart = 1000)
+plot(data$fico, data$days.with.cr.line , col = km1$cluster)
+```
+
+```{r}
+(pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
+summary(pr)
+biplot(pr)
+plot(pr$x[,c(1,2)], col = as.factor(data$not.fully.paid))
+plot(pr$x[,c(1,3)], col = as.factor(data$not.fully.paid))
+plot(pr$x[,c(2,3)], col = as.factor(data$not.fully.paid))
+
+km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
+plot(pr$x[,1:2], col = km1$cluster)
+table(km1$cluster, data$not.fully.paid)
+```
+
+# Examining the relationship between days with
 ```{r}
 full_paid_data <- data %>%
                 filter(not.fully.paid == 0) %>%
                 select(-not.fully.paid)
 
-lm(fico ~  days.with.cr.line*dti*log.annual.inc - days.with.cr.line:log.annual.inc, data = data) %>% summary()
+lm(days.with.cr.line ~ fico*dti, data = data) %>% summary()
+lm(days.with.cr.line ~ log.annual.inc + poly(fico, 3), data = data) %>% summary()
 ```
+
+
 ```{r}
 (pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
 summary(pr)
@@ -105,24 +150,9 @@ km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
 plot(pr$x[,1:2], col = km1$cluster)
 table(km1$cluster, data$not.fully.paid)
 ```
+
 
 ## Probability that an individual with a high fico score defaults on a high interest loan
-
-
-
-```{r}
-(pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
-summary(pr)
-biplot(pr)
-plot(pr$x[,c(1,2)], col = as.factor(data$not.fully.paid))
-plot(pr$x[,c(1,3)], col = as.factor(data$not.fully.paid))
-plot(pr$x[,c(2,3)], col = as.factor(data$not.fully.paid))
-
-km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
-plot(pr$x[,1:2], col = km1$cluster)
-table(km1$cluster, data$not.fully.paid)
-```
-
 
 ```{r}
 data %>%
@@ -132,11 +162,30 @@ data %>%
 
 summary(fico_int_model <- glm(formula = not.fully.paid ~ fico*int.rate, data = data, family = "binomial"))
 
-sample <- data %>% 
-  
+set.seed(0)
+ind <- sample(nrow(data), size = round(nrow(data)*.8))
+train <- data[ind,]
+test <- data[-ind,]
+
+ctrl <- trainControl(method = "repeatedcv", repeats = 5,
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary,
+                     sampling = "down")
+
+gbm <- train(not.fully.paid ~ .,
+             data = train,
+             method = "gbm",
+             metric = "ROC",
+             verbose = F,
+             trControl = ctrl) 
+
+probs <- predict(gbm, test, type = "prob")
+preds <- ifelse(probs[1] > .50, "No", "Yes")
+table(preds, test$credit.policy)
 ```
 
 ```{r}
 summary(Days_model <- lm(days.with.cr.line ~ . - log.annual.inc - not.fully.paid + int.rate:fico, data = data))
 
 ```
+
