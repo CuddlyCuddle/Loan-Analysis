@@ -19,8 +19,10 @@ lapply(libs, require, character.only = T)
 # Loading Data
 ```{r cars}
 data <- fread("data/loan_data.csv") %>% 
-        mutate(not.fully.paid = factor(ifelse(not.fully.paid == 1, "No", "Yes")),
-               credit.policy = factor(ifelse(credit.policy == 1, "No", "Yes")))
+        mutate(not.fully.paid = factor(ifelse(not.fully.paid == 1, "Yes", "No")),
+               credit.policy = factor(ifelse(credit.policy == 1, "Yes", "No")),
+               annual.inc = exp(log.annual.inc),
+               days = round(data$days.with.cr.line))
 
 ```
 
@@ -42,29 +44,52 @@ data <- fread("data/loan_data.csv") %>%
 | not_fully_paid | numeric   | 1 if the loan is not fully paid; 0 otherwise.
 
 # Exploratory Data Analysis
+## Exploring Possible response variables
+### Examining fully paid 
 ```{r}
 data %>%
-ggplot(aes(x = factor(not.fully.paid), fill = factor(not.fully.paid))) +
-  geom_bar()
+ggplot(aes(x = factor(not.fully.paid), fill = not.fully.paid)) +
+  geom_bar() +
+  labs(x = "Default", y = "Count", title = "Number of Clients who did and did not Default") +
+  theme_minimal() +
+  theme(legend.position = "none")
 
 fully_paid_prop <- data %>%
-  summarize(prop = mean(not.fully.paid == 0))
+  summarize(prop = mean(not.fully.paid == "No")) %>%
+  pull()
+
+Counts <- data %>%
+  count(not.fully.paid)
 ```
-##
+
+  When looking at the number of people who defaulted (did not completely pay off the loan) on their loan, there is a significant difference between the number of individuals who have paid off their loans completely vs those who defaulted on it. With around `r fully_paid_prop*100`% (`r Counts[1,2]`) paying off their loans completely and around `r (1-fully_paid_prop)*100`% (`r Counts[2,2]`) defaulting on their loans, this as a response variable is unbalanced and will require balancing during the prediction process. 
+
+
+### Examining days with credit line
 ```{r}
 data %>% 
   ggplot(aes(x = days.with.cr.line, color = factor(not.fully.paid))) +
-  geom_histogram()
+  geom_histogram() +
+  labs(x = "Days with Credit Line", y = "Count", title = "Histogram of Days with Credit Line by Defaults", color = "Default") +
+  theme_minimal()
 ```
 
-##
 ```{r}
 data %>% 
   ggplot(aes(x = days.with.cr.line, color = factor(purpose))) +
-  geom_histogram()
+  geom_histogram() +
+  labs(x = "Days with Credit Line", y = "Count", title = "Histogram of Days with Credit Line by Purpose", color = "Purpose") +
+  scale_color_discrete(labels = c("Other", "Credit Card", "Debt Consolidation", "Educational", "Home Improvement", "Major Purchase", "Small Business")) +
+  theme_minimal()
+```
+##
+```{r}
+ggplot(data, aes(factor(pub.rec), fico, fill = factor(pub.rec))) +
+  geom_boxplot()
+
 ```
 
-##
+
 ```{r}
 data %>% 
   ggplot(aes(x = fico, y = days.with.cr.line, color = factor(not.fully.paid))) +
@@ -94,16 +119,32 @@ data %>%
 data %>%
   ggplot(aes(x = log.annual.inc, y = days.with.cr.line, color = dti)) +
   geom_point() +
-  geom_smooth(method = "loess") +
+  geom_smooth(method = "loess", color = "red") +
   geom_smooth(method = "lm")
+
 ```
 
-##
+# Poisson Regression
+## Estimating Days with credit line based on character traits
 ```{r}
-data %>%
-  ggplot(aes(x = revol.util, y = log.annual.inc)) +
-  geom_point()
+# Variables of interest: 
+##
+plot(log(days) ~ fico, data = data)
+plot((1/days) ~ int.rate, data = data)
+summary(pois_reg <- glm(days ~ int.rate*fico + I(int.rate^2) + log.annual.inc, data = data, family = "Gamma"))
+test_data <- data[runif(500, min = 0, max = nrow(data)),]
+pred <- predict(pois_reg, newdata = test_data, type = "response")
+actual <- test_data[,days.with.cr.line]
+
+pchisq(pois_reg$deviance, pois_reg$df.residual, lower.tail=F)
+
+plot(pois_reg)
+plot(pred, actual)
+hist(pred)
+hist(actual)
 ```
+
+
 
 
 # Cluster Analysis and Dimensionality reduction
@@ -127,17 +168,6 @@ plot(pr$x[,1:2], col = km1$cluster)
 table(km1$cluster, data$not.fully.paid)
 ```
 
-# Examining the relationship between days with
-```{r}
-full_paid_data <- data %>%
-                filter(not.fully.paid == 0) %>%
-                select(-not.fully.paid)
-
-lm(days.with.cr.line ~ fico*dti, data = data) %>% summary()
-lm(days.with.cr.line ~ log.annual.inc + poly(fico, 3), data = data) %>% summary()
-```
-
-
 ```{r}
 (pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
 summary(pr)
@@ -151,8 +181,15 @@ plot(pr$x[,1:2], col = km1$cluster)
 table(km1$cluster, data$not.fully.paid)
 ```
 
+# Binomial Models and Linear Models
+```{r}
+full_paid_data <- data %>%
+                filter(not.fully.paid == 0) %>%
+                select(-not.fully.paid)
 
-## Probability that an individual with a high fico score defaults on a high interest loan
+lm(days.with.cr.line ~ fico*dti, data = data) %>% summary()
+lm(days.with.cr.line ~ log.annual.inc + poly(fico, 3), data = data) %>% summary()
+```
 
 ```{r}
 data %>%
@@ -161,7 +198,11 @@ data %>%
   geom_smooth(method = "lm")
 
 summary(fico_int_model <- glm(formula = not.fully.paid ~ fico*int.rate, data = data, family = "binomial"))
+```
 
+
+# Machine Learning Prediction Models using Caret
+```{r}
 set.seed(0)
 ind <- sample(nrow(data), size = round(nrow(data)*.8))
 train <- data[ind,]
@@ -183,9 +224,3 @@ probs <- predict(gbm, test, type = "prob")
 preds <- ifelse(probs[1] > .50, "No", "Yes")
 table(preds, test$credit.policy)
 ```
-
-```{r}
-summary(Days_model <- lm(days.with.cr.line ~ . - log.annual.inc - not.fully.paid + int.rate:fico, data = data))
-
-```
-
