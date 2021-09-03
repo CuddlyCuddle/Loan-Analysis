@@ -1,24 +1,25 @@
 ---
 title: "Loan Repayment and borrower analysis"
-output: html_document
+output: 
+  html_document:
+        code_folding: hide
+        toc: TRUE
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-```{r, include = FALSE}
-libs <- c("dplyr", "tidyr", "data.table", "ggplot2", "caret", "caTools")
+```{r, include = FALSE, message=FALSE}
+# Loading Libraries
+libs <- c("dplyr", "tidyr", "data.table", "ggplot2", "caret", "caTools", "car", "MASS", "gridExtra")
 lapply(libs, require, character.only = T)
 ```
-# Loading Data
-```{r cars}
-data <- fread("data/loan_data.csv") %>% 
+## The Loan Data
+```{r loading data, message=FALSE}
+# loading data
+data <- fread("data/loan_data.csv")
+data <-  data %>%
         mutate(not.fully.paid = factor(ifelse(not.fully.paid == 1, "Yes", "No")),
                credit.policy = factor(ifelse(credit.policy == 1, "Yes", "No")),
                annual.inc = exp(log.annual.inc),
@@ -43,10 +44,10 @@ data <- fread("data/loan_data.csv") %>%
 | pub_rec | numeric   | The borrower's number of derogatory public records.
 | not_fully_paid | numeric   | 1 if the loan is not fully paid; 0 otherwise.
 
-# Exploratory Data Analysis
-## Exploring Possible response variables
-### Examining fully paid 
-```{r}
+## Exploratory Data Analysis
+### Exploring Possible response variables
+#### Examining fully paid 
+```{r, message=FALSE}
 data %>%
 ggplot(aes(x = factor(not.fully.paid), fill = not.fully.paid)) +
   geom_bar() +
@@ -65,73 +66,106 @@ Counts <- data %>%
   When looking at the number of people who defaulted (did not completely pay off the loan) on their loan, there is a significant difference between the number of individuals who have paid off their loans completely vs those who defaulted on it. With around `r fully_paid_prop*100`% (`r Counts[1,2]`) paying off their loans completely and around `r (1-fully_paid_prop)*100`% (`r Counts[2,2]`) defaulting on their loans, this as a response variable is unbalanced and will require balancing during the prediction process. 
 
 
-### Examining days with credit line
-```{r}
-data %>% 
+#### Examining days with credit line
+```{r, message=FALSE}
+days_his1 <- data %>% 
   ggplot(aes(x = days.with.cr.line, color = factor(not.fully.paid))) +
   geom_histogram() +
   labs(x = "Days with Credit Line", y = "Count", title = "Histogram of Days with Credit Line by Defaults", color = "Default") +
   theme_minimal()
-```
 
-```{r}
-data %>% 
+days_his2 <- data %>% 
   ggplot(aes(x = days.with.cr.line, color = factor(purpose))) +
   geom_histogram() +
   labs(x = "Days with Credit Line", y = "Count", title = "Histogram of Days with Credit Line by Purpose", color = "Purpose") +
   scale_color_discrete(labels = c("Other", "Credit Card", "Debt Consolidation", "Educational", "Home Improvement", "Major Purchase", "Small Business")) +
   theme_minimal()
+
+grid.arrange(days_his1, days_his2)
 ```
-##
-```{r}
+
+###
+```{r, message=FALSE}
 ggplot(data, aes(factor(pub.rec), fico, fill = factor(pub.rec))) +
   geom_boxplot()
 
 ```
 
 
+### Delinquency
+```{r, message=FALSE}
+ggplot(data, aes(factor(delinq.2yrs), int.rate, fill = factor(delinq.2yrs))) +
+  geom_boxplot()
+ggplot(data, aes(factor(delinq.2yrs), log.annual.inc, fill = factor(delinq.2yrs))) +
+  geom_boxplot()
+```
+
+## Inferential Modeling
 ```{r}
 data %>% 
   ggplot(aes(x = fico, y = days.with.cr.line, color = factor(not.fully.paid))) +
   geom_point() +
-  geom_smooth(method = "loess")
+  geom_smooth(method = "lm")
+
+data %>%
+  ggplot(aes(x = fico, y = int.rate, color = factor(not.fully.paid))) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+data %>% 
+  ggplot(aes(x = fico, y = revol.util, color = not.fully.paid)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+Simple_ficos <- lm(cbind(days.with.cr.line, int.rate, revol.util) ~ fico + not.fully.paid, data = data)
 ```
 
-##
+
 ```{r}
-data %>% 
-  ggplot(aes(x = revol.util, y = fico, color = not.fully.paid)) +
+data %>%
+  ggplot(aes(x = log.annual.inc, y = fico)) +
   geom_point() +
   geom_smooth(method = "lm")
 ```
-
-
-```{r}
-data %>% 
-  ggplot(aes(x = dti, y = days.with.cr.line, color = factor(not.fully.paid))) +
-  geom_point() +
-  geom_smooth(method = "lm")
-```
-
-
 ##
 ```{r}
 data %>%
-  ggplot(aes(x = log.annual.inc, y = days.with.cr.line, color = dti)) +
+  ggplot(aes(x = log.annual.inc, y = days.with.cr.line, color = not.fully.paid)) +
   geom_point() +
-  geom_smooth(method = "loess", color = "red") +
   geom_smooth(method = "lm")
-
 ```
 
-# Poisson Regression
-## Estimating Days with credit line based on character traits
+
+# Model Analysis
+## Determining factors contributing to a person defaulting on the loan
+```{r}
+summary(complete_binomial <- glm(formula = not.fully.paid ~ . - days - annual.inc, data = data, family = "binomial"))
+Stepwise_binomial <- stepAIC(complete_binomial, direction = "both")
+summary(Stepwise_binomial)
+vif(Stepwise_binomial)
+```
+
+
+
+## Determining factors contributing to days with the credit line
+```{r}
+lm(days.with.cr.line ~ fico, data = data) %>% summary()
+lm(days.with.cr.line ~ log.annual.inc + poly(fico, 3), data = data) %>% summary()
+complete_days <- lm(days.with.cr.line ~ .- days - annual.inc - not.fully.paid, data = data)
+forward_selection <- stepAIC(complete_days, direction = "forward")
+summary(forward_selection)
+vif(forward_selection)
+```
+
+## Gamma Regression
+### Estimating Days with credit line based on character traits
 ```{r}
 # Variables of interest: 
 ##
 plot(log(days) ~ fico, data = data)
-plot((1/days) ~ int.rate, data = data)
-summary(pois_reg <- glm(days ~ int.rate*fico + I(int.rate^2) + log.annual.inc, data = data, family = "Gamma"))
+plot((1/days) ~ fico, data = data)
+summary(pois_reg <- glm(days ~ int.rate*fico + I(int.rate^2), data = data, family = Gamma(link = "log")))
+summary(pois_reg <- glm(days ~ . + I(int.rate^2), data = data, family = Gamma(link = "log")))
 test_data <- data[runif(500, min = 0, max = nrow(data)),]
 pred <- predict(pois_reg, newdata = test_data, type = "response")
 actual <- test_data[,days.with.cr.line]
@@ -140,87 +174,83 @@ pchisq(pois_reg$deviance, pois_reg$df.residual, lower.tail=F)
 
 plot(pois_reg)
 plot(pred, actual)
+plot(log(pred), actual)
 hist(pred)
 hist(actual)
-```
 
+summary(lm(actual ~ log(pred)))
+```
+### Gamma Regression Model Stacking (Prediction Oriented)
+```{r}
+
+
+
+```
 
 
 
 # Cluster Analysis and Dimensionality reduction
 ```{r}
-summary(pr <- prcomp(data[,c("fico", "revol.util", "days.with.cr.line", "dti")], scale = T))
-biplot(pr)
-km1 <- kmeans(scaled, centers = 3, nstart = 1000)
-plot(data$fico, data$days.with.cr.line , col = km1$cluster)
+# summary(pr <- prcomp(data[,c("fico", "revol.util", "days.with.cr.line", "dti")], scale = T))
+# biplot(pr)
+# km1 <- kmeans(scaled, centers = 3, nstart = 1000)
+# plot(data$fico, data$days.with.cr.line , col = km1$cluster)
 ```
 
 ```{r}
-(pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
-summary(pr)
-biplot(pr)
-plot(pr$x[,c(1,2)], col = as.factor(data$not.fully.paid))
-plot(pr$x[,c(1,3)], col = as.factor(data$not.fully.paid))
-plot(pr$x[,c(2,3)], col = as.factor(data$not.fully.paid))
-
-km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
-plot(pr$x[,1:2], col = km1$cluster)
-table(km1$cluster, data$not.fully.paid)
+# (pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
+# summary(pr)
+# biplot(pr)
+# plot(pr$x[,c(1,2)], col = as.factor(data$not.fully.paid))
+# plot(pr$x[,c(1,3)], col = as.factor(data$not.fully.paid))
+# plot(pr$x[,c(2,3)], col = as.factor(data$not.fully.paid))
+# 
+# km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
+# plot(pr$x[,1:2], col = km1$cluster)
+# table(km1$cluster, data$not.fully.paid)
 ```
 
 ```{r}
-(pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
-summary(pr)
-biplot(pr)
-plot(pr$x[,c(1,2)], col = as.factor(data$not.fully.paid))
-plot(pr$x[,c(1,3)], col = as.factor(data$not.fully.paid))
-plot(pr$x[,c(2,3)], col = as.factor(data$not.fully.paid))
-
-km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
-plot(pr$x[,1:2], col = km1$cluster)
-table(km1$cluster, data$not.fully.paid)
-```
-
-# Binomial Models and Linear Models
-```{r}
-full_paid_data <- data %>%
-                filter(not.fully.paid == 0) %>%
-                select(-not.fully.paid)
-
-lm(days.with.cr.line ~ fico*dti, data = data) %>% summary()
-lm(days.with.cr.line ~ log.annual.inc + poly(fico, 3), data = data) %>% summary()
-```
-
-```{r}
-data %>%
-  ggplot(aes(x = fico, y = int.rate, color = factor(not.fully.paid))) +
-  geom_point() +
-  geom_smooth(method = "lm")
-
-summary(fico_int_model <- glm(formula = not.fully.paid ~ fico*int.rate, data = data, family = "binomial"))
+# (pr <- prcomp(data[,c(3,6,7,9,10)], scale = T))
+# summary(pr)
+# biplot(pr)
+# plot(pr$x[,c(1,2)], col = as.factor(data$not.fully.paid))
+# plot(pr$x[,c(1,3)], col = as.factor(data$not.fully.paid))
+# plot(pr$x[,c(2,3)], col = as.factor(data$not.fully.paid))
+# 
+# km1 <- kmeans(pr$x[,1:3], centers = 3, nstart = 1000)
+# plot(pr$x[,1:2], col = km1$cluster)
+# table(km1$cluster, data$not.fully.paid)
 ```
 
 
 # Machine Learning Prediction Models using Caret
+## 
 ```{r}
-set.seed(0)
-ind <- sample(nrow(data), size = round(nrow(data)*.8))
-train <- data[ind,]
-test <- data[-ind,]
-
-ctrl <- trainControl(method = "repeatedcv", repeats = 5,
-                     classProbs = TRUE,
-                     summaryFunction = twoClassSummary,
-                     sampling = "down")
-
-gbm <- train(not.fully.paid ~ .,
-             data = train,
-             method = "gbm",
-             metric = "ROC",
-             verbose = F,
-             trControl = ctrl) 
-
-probs <- predict(gbm, test, type = "prob")
-preds <- ifelse(probs[1] > .50, "No", "Yes")
-table(preds, test$credit.policy)
+# set.seed(0)
+# ind <- sample(nrow(data), size = round(nrow(data)*.8))
+# train <- data[ind,]
+# test <- data[-ind,]
+# 
+# 
+# formula = 
+# 
+# ctrl <- trainControl(method = "repeatedcv", repeats = 5,
+#                      classProbs = TRUE,
+#                      summaryFunction = twoClassSummary,
+#                      sampling = "down")
+# 
+# gbm <- train(formula,
+#              data = train,
+#              method = "gbm",
+#              metric = "ROC",
+#              verbose = F,
+#              trControl = ctrl) 
+# 
+# probs <- predict(gbm, test, type = "prob")
+# preds <- ifelse(probs[1] > .50, "No", "Yes")
+# table(preds, test$credit.policy)
 ```
+
+
+## 
