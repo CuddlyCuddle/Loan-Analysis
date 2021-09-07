@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r, include = FALSE, message=FALSE}
 # Loading Libraries
-libs <- c("dplyr", "tidyr", "data.table", "ggplot2", "caret", "caTools", "car", "MASS", "gridExtra")
+libs <- c("dplyr", "tidyr", "data.table", "ggplot2", "caret", "caTools", "car", "MASS", "gridExtra", "broom", "DT")
 lapply(libs, require, character.only = T)
 ```
 ## The Loan Data
@@ -84,20 +84,29 @@ days_his2 <- data %>%
 grid.arrange(days_his1, days_his2)
 ```
 
-###
-```{r, message=FALSE}
-ggplot(data, aes(factor(pub.rec), fico, fill = factor(pub.rec))) +
-  geom_boxplot()
-
-```
-
+Based on the histograms above, the distribution of days with a credit line stays relatively identical across the different populations when accounting for either defaults or by the purpose of the loans. Moreover, as the population increases, within the groups, it appears to approach a right-tail skewed normal distribution.
 
 ### Delinquency
 ```{r, message=FALSE}
+# Public Record
+ggplot(data, aes(factor(pub.rec), fico, fill = factor(pub.rec))) +
+  geom_boxplot() +
+  labs(x = "Number of derogatory Public Records", y = "FICO Score", title = "Box Plot of number of FICO against the number of derogatory Public Records") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Delinquencies
 ggplot(data, aes(factor(delinq.2yrs), int.rate, fill = factor(delinq.2yrs))) +
-  geom_boxplot()
+  geom_boxplot() +
+  labs(x = "Number of Delinquencies in 2 years", y = "Interest Rate", title = "Box Plot of number of interest rate against the Number of Delinquencies in 2 years") +
+  theme_minimal() +
+  theme(legend.position = "none")
+  
 ggplot(data, aes(factor(delinq.2yrs), log.annual.inc, fill = factor(delinq.2yrs))) +
-  geom_boxplot()
+  geom_boxplot() +
+  labs(x = "Number of Delinquencies in 2 years", y = "Interest Rate", title = "Box Plot of number of FICO against the Number of Delinquencies in 2 years") +
+  theme_minimal() +
+  theme(legend.position = "none")
 ```
 
 ## Inferential Modeling
@@ -118,6 +127,7 @@ data %>%
   geom_smooth(method = "lm")
 
 Simple_ficos <- lm(cbind(days.with.cr.line, int.rate, revol.util) ~ fico + not.fully.paid, data = data)
+datatable(tidy(Simple_ficos))
 ```
 
 
@@ -127,6 +137,7 @@ data %>%
   geom_point() +
   geom_smooth(method = "lm")
 ```
+
 ##
 ```{r}
 data %>%
@@ -180,6 +191,7 @@ hist(actual)
 
 summary(lm(actual ~ log(pred)))
 ```
+
 ### Gamma Regression Model Stacking (Prediction Oriented)
 ```{r}
 
