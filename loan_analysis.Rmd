@@ -1,9 +1,8 @@
 ---
 title: "Loan Repayment and borrower analysis"
 output: 
-  html_document:
+      rmdformats::downcute:
         code_folding: hide
-        toc: TRUE
 ---
 
 ```{r setup, include=FALSE}
@@ -12,10 +11,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r, include = FALSE, message=FALSE}
 # Loading Libraries
-libs <- c("dplyr", "tidyr", "data.table", "ggplot2", "caret", "caTools", "car", "MASS", "gridExtra", "broom", "DT")
+libs <- c("dplyr", "tidyr", "data.table", "ggplot2", "caret", "caTools", "car", "MASS", "gridExtra", "broom", "DT", "randomForest")
 lapply(libs, require, character.only = T)
 ```
-## The Loan Data
+# The Loan Data
 ```{r loading data, message=FALSE}
 # loading data
 data <- fread("data/loan_data.csv")
@@ -29,24 +28,31 @@ data <-  data %>%
 
 | Variable  | class     | description                    |
 |:----------|:----------|:-------------------------------|
-| credit_policy   | numeric | 1 if the customer meets the credit underwriting criteria; 0 otherwise. |
+| credit.policy   | numeric | 1 if the customer meets the credit underwriting criteria; 0 otherwise. |
 | purpose      | character | The purpose of the loan. |
-| int_rate      | numeric   | The interest rate of the loan (more risky borrowers are assigned higher interest rates).  |
+| int.rate      | numeric   | The interest rate of the loan (more risky borrowers are assigned higher interest rates).  |
 | installment  | numeric   | The monthly installments owed by the borrower if the loan is funded. |
-| log_annual_inc | numeric   | The natural log of the self-reported annual income of the borrower. |
+| log.annual_inc | numeric   | The natural log of the self-reported annual income of the borrower. |
 | dti | numeric   | The debt-to-income ratio of the borrower (amount of debt divided by annual income). |
 | fico | numeric   | The FICO credit score of the borrower. |
-| days_with_cr_line | numeric   | The number of days the borrower has had a credit line. |
-| revol_bal | numeric   | The borrower's revolving balance (amount unpaid at the end of the credit card billing cycle). |
-| revol_util | numeric   | The borrower's revolving line utilization rate (the amount of the credit line used relative to total credit available). |
-| inq_last_6mths | numeric   | The borrower's number of inquiries by creditors in the last 6 months. |
-| delinq_2yrs | numeric   | The number of times the borrower had been 30+ days past due on a payment in the past 2 years. |
-| pub_rec | numeric   | The borrower's number of derogatory public records.
-| not_fully_paid | numeric   | 1 if the loan is not fully paid; 0 otherwise.
+| days.with.cr.line | numeric   | The number of days the borrower has had a credit line. |
+| revol.bal | numeric   | The borrower's revolving balance (amount unpaid at the end of the credit card billing cycle). |
+| revol.util | numeric   | The borrower's revolving line utilization rate (the amount of the credit line used relative to total credit available). |
+| inq.last.6mths | numeric   | The borrower's number of inquiries by creditors in the last 6 months. |
+| delinq.2yrs | numeric   | The number of times the borrower had been 30+ days past due on a payment in the past 2 years. |
+| pub.rec | numeric   | The borrower's number of derogatory public records.
+| not.fully.paid | numeric   | 1 if the loan is not fully paid; 0 otherwise.
 
-## Exploratory Data Analysis
-### Exploring Possible response variables
-#### Examining fully paid 
+# Purpose
+
+For this analysis, the intent is:
+  - Categorize individuals based on their borrower behavior, possibly determining qualities or a set of qualities that individuals exhibit effecting possible FICO score, successful completion of loan payment, or the duration until the loan is repaid.
+  - To predict whether a person will repay their loan to completion or not and to predict the duration until a person repays their loan.
+This analysis will be able to help lenders and borrowers by providing information for a borrower to alter their behavior so that they can possibly receive a lower interest rate, and increase their FICO score by imitating behavior in those with higher FICO scores. Moreover, borrowers will be able to predict the possibility that a person doesn't pay their loan completely so they can decide whether or not to engage with those borrowers.
+
+# Exploratory Data Analysis
+## Exploring Possible response variables
+### Examining fully paid 
 ```{r, message=FALSE}
 data %>%
 ggplot(aes(x = factor(not.fully.paid), fill = not.fully.paid)) +
@@ -66,8 +72,8 @@ Counts <- data %>%
   When looking at the number of people who defaulted (did not completely pay off the loan) on their loan, there is a significant difference between the number of individuals who have paid off their loans completely vs those who defaulted on it. With around `r fully_paid_prop*100`% (`r Counts[1,2]`) paying off their loans completely and around `r (1-fully_paid_prop)*100`% (`r Counts[2,2]`) defaulting on their loans, this as a response variable is unbalanced and will require balancing during the prediction process. 
 
 
-#### Examining days with credit line
-```{r, message=FALSE}
+### Examining days with credit line
+```{r, message=FALSE, out.height = "150%"}
 days_his1 <- data %>% 
   ggplot(aes(x = days.with.cr.line, color = factor(not.fully.paid))) +
   geom_histogram() +
@@ -87,55 +93,82 @@ grid.arrange(days_his1, days_his2)
 Based on the histograms above, the distribution of days with a credit line stays relatively identical across the different populations when accounting for either defaults or by the purpose of the loans. Moreover, as the population increases, within the groups, it appears to approach a right-tail skewed normal distribution.
 
 ### Delinquency
-```{r, message=FALSE}
+```{r, message=FALSE, out.height = "150%"}
 # Public Record
-ggplot(data, aes(factor(pub.rec), fico, fill = factor(pub.rec))) +
+D1 <- ggplot(data, aes(factor(pub.rec), fico, fill = factor(pub.rec))) +
   geom_boxplot() +
   labs(x = "Number of derogatory Public Records", y = "FICO Score", title = "Box Plot of number of FICO against the number of derogatory Public Records") +
   theme_minimal() +
   theme(legend.position = "none")
 
 # Delinquencies
-ggplot(data, aes(factor(delinq.2yrs), int.rate, fill = factor(delinq.2yrs))) +
+D2 <- ggplot(data, aes(factor(delinq.2yrs), int.rate, fill = factor(delinq.2yrs))) +
   geom_boxplot() +
   labs(x = "Number of Delinquencies in 2 years", y = "Interest Rate", title = "Box Plot of number of interest rate against the Number of Delinquencies in 2 years") +
   theme_minimal() +
   theme(legend.position = "none")
   
-ggplot(data, aes(factor(delinq.2yrs), log.annual.inc, fill = factor(delinq.2yrs))) +
+D3 <- ggplot(data, aes(factor(delinq.2yrs), log.annual.inc, fill = factor(delinq.2yrs))) +
   geom_boxplot() +
-  labs(x = "Number of Delinquencies in 2 years", y = "Interest Rate", title = "Box Plot of number of FICO against the Number of Delinquencies in 2 years") +
+  labs(x = "FICO Score", y = "Interest Rate", title = "Box Plot of number of FICO against the Number of Delinquencies in 2 years") +
   theme_minimal() +
   theme(legend.position = "none")
+grid.arrange(D1, D2, D3)
 ```
 
-## Inferential Modeling
-```{r}
-data %>% 
-  ggplot(aes(x = fico, y = days.with.cr.line, color = factor(not.fully.paid))) +
-  geom_point() +
-  geom_smooth(method = "lm")
+When looking at the delinquencies and the number of derogatory public records, there isn't a visually significant difference between the medians FICO score and interest rate; however it does appear that individuals with more derogatory public records tend to have a lower FICO score and individuals with more delinquencies tend to have a higher interest rate. Although, this is not statistically confirmed.
 
-data %>%
-  ggplot(aes(x = fico, y = int.rate, color = factor(not.fully.paid))) +
+# Inferential Modeling
+## Linear Model Visualizations against Fico Score
+```{r message = FALSE, out.height = "500%"}
+LM_V1 <- data %>% 
+  ggplot(aes(x = fico, y = days.with.cr.line, color = not.fully.paid)) +
   geom_point() +
-  geom_smooth(method = "lm")
+  geom_smooth(method = "lm") +
+  theme_minimal() +
+  labs(x = "FICO Score", y = "Days with Credit Line", color = "Not Fully Paid")
 
-data %>% 
+LM_V2 <- data %>%
+  ggplot(aes(x = fico, y = int.rate, color = not.fully.paid)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_minimal()+
+  labs(x = "FICO Score", y = "Interest Rate", color = "Not Fully Paid")
+
+LM_V3 <- data %>% 
   ggplot(aes(x = fico, y = revol.util, color = not.fully.paid)) +
   geom_point() +
-  geom_smooth(method = "lm")
+  geom_smooth(method = "lm") +
+  theme_minimal() +
+  labs(x = "FICO Score", y = "Revolving Utilization of Debt (%)", color = "Not Fully Paid")
 
-Simple_ficos <- lm(cbind(days.with.cr.line, int.rate, revol.util) ~ fico + not.fully.paid, data = data)
+LM_V4 <- data %>% 
+  ggplot(aes(x = fico, y = installment, color = not.fully.paid)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_minimal() +
+  labs(x = "FICO Score", y = "Installment (USD)", color = "Not Fully Paid")
+
+grid.arrange(LM_V1, LM_V2, LM_V3, LM_V4)
+```
+
+
+## Linear Models Results
+```{r, out.width = "200%"}
+Simple_ficos <- lm(cbind(days.with.cr.line, int.rate, revol.util) ~ fico, data = data)
 datatable(tidy(Simple_ficos))
 ```
 
 
 ```{r}
 data %>%
-  ggplot(aes(x = log.annual.inc, y = fico)) +
+  ggplot(aes(x = fico, y = log.annual.inc)) +
   geom_point() +
   geom_smooth(method = "lm")
+
+data %>%
+  ggplot(aes(x = not.fully.paid, y = installment)) +
+  geom_boxplot()
 ```
 
 ##
@@ -167,6 +200,7 @@ forward_selection <- stepAIC(complete_days, direction = "forward")
 summary(forward_selection)
 vif(forward_selection)
 ```
+
 
 ## Gamma Regression
 ### Estimating Days with credit line based on character traits
@@ -201,8 +235,10 @@ summary(lm(actual ~ log(pred)))
 
 
 
-# Cluster Analysis and Dimensionality reduction
+
 ```{r}
+# Cluster Analysis and Dimensionality reduction
+
 # summary(pr <- prcomp(data[,c("fico", "revol.util", "days.with.cr.line", "dti")], scale = T))
 # biplot(pr)
 # km1 <- kmeans(scaled, centers = 3, nstart = 1000)
@@ -245,24 +281,50 @@ summary(lm(actual ~ log(pred)))
 # test <- data[-ind,]
 # 
 # 
-# formula = 
+# formula1 =  not.fully.paid ~ . - annual.inc - days - pub.rec
+# 
 # 
 # ctrl <- trainControl(method = "repeatedcv", repeats = 5,
 #                      classProbs = TRUE,
 #                      summaryFunction = twoClassSummary,
 #                      sampling = "down")
 # 
-# gbm <- train(formula,
+# 
+# gbm <- train(formula1,
 #              data = train,
 #              method = "gbm",
 #              metric = "ROC",
 #              verbose = F,
-#              trControl = ctrl) 
-# 
+#              trControl = ctrl)
 # probs <- predict(gbm, test, type = "prob")
 # preds <- ifelse(probs[1] > .50, "No", "Yes")
-# table(preds, test$credit.policy)
+# table(preds, Actual = test$credit.policy)
+# 
+# 
+# rf <- train(formula1,
+#              data = train,
+#              method = "rf",
+#              metric = "ROC",
+#              verbose = F,
+#              trControl = ctrl)
+# probs <- predict(rf, test, type = "prob")
+# preds <- ifelse(probs[1] > .50, "No", "Yes")
+# table(preds, Actual = test$credit.policy)
+# 
+# 
+# 
+# ada <- train(formula1,
+#              data = train,
+#              method = "adaboost",
+#              metric = "ROC",
+#              verbose = F,
+#              trControl = ctrl)
+# probs <- predict(ada, test, type = "prob")
+# preds <- ifelse(probs[1] > .50, "No", "Yes")
+# table(preds, Actual = test$credit.policy)
+# 
+
 ```
 
 
-## 
+# Conclusion
