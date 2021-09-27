@@ -188,8 +188,8 @@ data %>%
 # Model Analysis
 ## Determining factors contributing to a person defaulting on the loan
 ```{r}
-summary(complete_logit <- glm(formula = not.fully.paid ~ . - days - annual.inc, data = data, family = "binomial"))
-Stepwise_logit <- stepAIC(complete_binomial, direction = "both")
+complete_logit <- glm(formula = not.fully.paid ~ . - days - annual.inc, data = data, family = "binomial")
+Stepwise_logit <- stepAIC(complete_logit, direction = "both")
 vif_scores <- vif(Stepwise_logit)
 tidy_logit <- tidy(Stepwise_logit, exponentiate = TRUE, conf.int = TRUE)
 knitr::kable(tidy_logit)
