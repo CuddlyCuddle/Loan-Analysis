@@ -6,7 +6,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
 ```{r, include = FALSE, message=FALSE}
@@ -156,23 +156,28 @@ grid.arrange(LM_V1, LM_V2, LM_V3, LM_V4)
 ## Linear Models Results
 ```{r, out.width = "200%"}
 Simple_ficos <- lm(cbind(days.with.cr.line, int.rate, revol.util) ~ fico, data = data)
-datatable(tidy(Simple_ficos))
+knitr::kable(tidy(Simple_ficos))
 ```
 
+Based on the above graphs and the table of linear regressions, FICO score does have a statistically significant relationship with all of the variables presented above. Naturally, a person would assume an individual with a higher FICO score would have a lower utilization of debt, a higher installment, and lower interest rates as the FICO scores are an attempt to captures peoples financial behaviors and individuals with higher fico scores generally have offer lower risks to the lender.Its interesting to note that individuals who also have higher fico scores take longer to pay out their loans. This is contrary to a common belief that people with higher fico scores pay off their loans quickly.
 
 ```{r}
 data %>%
   ggplot(aes(x = fico, y = log.annual.inc)) +
   geom_point() +
-  geom_smooth(method = "lm")
-
-data %>%
-  ggplot(aes(x = not.fully.paid, y = installment)) +
-  geom_boxplot()
+  geom_smooth(method = "lm") +
+  theme_minimal() +
+  labs(x = "FICO Score", y = "Log(Annual Income)", title = "Log(Annual Income) against Fico Score")
 ```
 
-##
+## Other Variables
 ```{r}
+data %>%
+  ggplot(aes(x = not.fully.paid, y = installment)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(x = "", y = "", title = "")
+
 data %>%
   ggplot(aes(x = log.annual.inc, y = days.with.cr.line, color = not.fully.paid)) +
   geom_point() +
@@ -183,58 +188,46 @@ data %>%
 # Model Analysis
 ## Determining factors contributing to a person defaulting on the loan
 ```{r}
-summary(complete_binomial <- glm(formula = not.fully.paid ~ . - days - annual.inc, data = data, family = "binomial"))
-Stepwise_binomial <- stepAIC(complete_binomial, direction = "both")
-summary(Stepwise_binomial)
-vif(Stepwise_binomial)
+summary(complete_logit <- glm(formula = not.fully.paid ~ . - days - annual.inc, data = data, family = "binomial"))
+Stepwise_logit <- stepAIC(complete_binomial, direction = "both")
+vif_scores <- vif(Stepwise_logit)
+tidy_logit <- tidy(Stepwise_logit, exponentiate = TRUE, conf.int = TRUE)
+knitr::kable(tidy_logit)
+knitr::kable(vif_scores)
 ```
-
-
-
-## Determining factors contributing to days with the credit line
-```{r}
-lm(days.with.cr.line ~ fico, data = data) %>% summary()
-lm(days.with.cr.line ~ log.annual.inc + poly(fico, 3), data = data) %>% summary()
-complete_days <- lm(days.with.cr.line ~ .- days - annual.inc - not.fully.paid, data = data)
-forward_selection <- stepAIC(complete_days, direction = "forward")
-summary(forward_selection)
-vif(forward_selection)
-```
-
+When running a complete first order model, for a logistic regression, most of the variables appear to have significance. In addition, levels in the purpose variable can be consolidated. The above results show the odds ratio of the model as they have already been transformed using tidy. Moreover, un unexpectedly, the vif score is drastically that what I was expecting showing that each variable was able to capture more of the model despite their relationships.
 
 ## Gamma Regression
 ### Estimating Days with credit line based on character traits
 ```{r}
-# Variables of interest: 
-##
-plot(log(days) ~ fico, data = data)
-plot((1/days) ~ fico, data = data)
-summary(pois_reg <- glm(days ~ int.rate*fico + I(int.rate^2), data = data, family = Gamma(link = "log")))
-summary(pois_reg <- glm(days ~ . + I(int.rate^2), data = data, family = Gamma(link = "log")))
-test_data <- data[runif(500, min = 0, max = nrow(data)),]
-pred <- predict(pois_reg, newdata = test_data, type = "response")
-actual <- test_data[,days.with.cr.line]
+## Creating Random Train-Test Sets
+set.seed(0)
+ind <- sample(nrow(data), size = round(nrow(data)*.8))
+train <- data[ind,]
+test <- data[-ind,]
 
-pchisq(pois_reg$deviance, pois_reg$df.residual, lower.tail=F)
+##Gamma Regression
+gamma_reg <- glm(days ~ . - days - annual.inc, data = train, family = Gamma(link = "log"))
 
-plot(pois_reg)
-plot(pred, actual)
-plot(log(pred), actual)
-hist(pred)
-hist(actual)
+## Train Prediction/ analysis
+pred <- predict(gamma_reg, newdata = train, type = "response")
+actual <- train[,days.with.cr.line]
 
-summary(lm(actual ~ log(pred)))
+plot(pred, actual, xlab = "Prediction", ylab = "Actual",main = "Train Set Gamma Model Prediction Vs Actual")
+plot(log(pred), actual, xlab = "Prediction", ylab = "Actual", main = "Train Set Stacked Model Prediction Vs Actual")
+
+#Stacked Model
+stacked_lm <- lm(actual ~ log(pred))
+summary(stacked_lm)
+
+## Test Set
+pred_test <- predict(gamma_reg, newdata = test, type = "response")
+actual_test <- test[,days.with.cr.line]
+pred2_test <- predict(stacked_lm, newdata = data.frame(pred = pred_test))
+plot(pred2_test, actual_test, xlab = "Prediction", ylab = "Actual",main = "Test Set Stacked Model Prediction Vs Actual")
 ```
 
-### Gamma Regression Model Stacking (Prediction Oriented)
-```{r}
-
-
-
-```
-
-
-
+In order to predict the days a person would take to pay off their loan, I used a gamma regression due to the fact that the distribution of the dependent variable days with credit line. The model is another complete first order model. For this task, I focus on the predictive power, thus, based off of the prediction-actual graph. There is possible interaction and higher order terms in the previous model and it would take a lot of testing and trial to determine the order and the interactions: a model of this nature would easily become complicated. Thus, I natural-log transformed the predictions of the gamma model and used a linear model on top. The linear model's results are presented above as well as the results of the test set.
 
 ```{r}
 # Cluster Analysis and Dimensionality reduction
@@ -272,59 +265,46 @@ summary(lm(actual ~ log(pred)))
 ```
 
 
-# Machine Learning Prediction Models using Caret
-## 
+# Machine Learning using Caret
 ```{r}
-# set.seed(0)
-# ind <- sample(nrow(data), size = round(nrow(data)*.8))
-# train <- data[ind,]
-# test <- data[-ind,]
-# 
-# 
-# formula1 =  not.fully.paid ~ . - annual.inc - days - pub.rec
-# 
-# 
-# ctrl <- trainControl(method = "repeatedcv", repeats = 5,
-#                      classProbs = TRUE,
-#                      summaryFunction = twoClassSummary,
-#                      sampling = "down")
-# 
-# 
-# gbm <- train(formula1,
-#              data = train,
-#              method = "gbm",
-#              metric = "ROC",
-#              verbose = F,
-#              trControl = ctrl)
-# probs <- predict(gbm, test, type = "prob")
-# preds <- ifelse(probs[1] > .50, "No", "Yes")
-# table(preds, Actual = test$credit.policy)
-# 
-# 
-# rf <- train(formula1,
-#              data = train,
-#              method = "rf",
-#              metric = "ROC",
-#              verbose = F,
-#              trControl = ctrl)
-# probs <- predict(rf, test, type = "prob")
-# preds <- ifelse(probs[1] > .50, "No", "Yes")
-# table(preds, Actual = test$credit.policy)
-# 
-# 
-# 
-# ada <- train(formula1,
-#              data = train,
-#              method = "adaboost",
-#              metric = "ROC",
-#              verbose = F,
-#              trControl = ctrl)
-# probs <- predict(ada, test, type = "prob")
-# preds <- ifelse(probs[1] > .50, "No", "Yes")
-# table(preds, Actual = test$credit.policy)
-# 
+set.seed(0)
+ind <- sample(nrow(data), size = round(nrow(data)*.8))
+train <- data[ind,]
+test <- data[-ind,]
+
+formula1 =  not.fully.paid ~ . - annual.inc - days - pub.rec
+
+
+ctrl <- trainControl(method = "repeatedcv", repeats = 5,
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary,
+                     sampling = "down")
+
+
+gbm <- train(formula1,
+             data = train,
+             method = "gbm",
+             metric = "ROC",
+             verbose = F,
+             trControl = ctrl)
+probs <- predict(gbm, test, type = "prob")
+preds <- ifelse(probs[1] > .50, "No", "Yes")
+table(preds, Actual = test$credit.policy)
+
+
+rf <- train(formula1,
+             data = train,
+             method = "rf",
+             metric = "ROC",
+             verbose = F,
+             trControl = ctrl)
+probs <- predict(rf, test, type = "prob")
+preds <- ifelse(probs[1] > .50, "No", "Yes")
+table(preds, Actual = test$credit.policy)
 
 ```
 
+Relatively quickly, I ran two machine learning models using caret and the results are presented above. Another post regarding this data set will be done in respect to caret and binomial classification.
 
 # Conclusion
+A new technique was used for this data set was used for predicting the amount of days before someone will pay off their loan: model stacking. Model stacking is a technique that isn't often talked about but can help and people increase the predictive power of their models significantly.
