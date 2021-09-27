@@ -5,4 +5,4 @@ The purpose of this project was originally for a competition and was not going t
 This was a relatively short project as I tried multiple techniques that did not yield the results I was looking for such as clustering in order to group customers based on qualities provided by the dataset, and logistic regression to predict the outcome of the loan.
 
 # The projects page is presented here:
-[Link to the project]()
+[Link to the project](https://cuddlycuddle.github.io/Loan-Analysis/)
